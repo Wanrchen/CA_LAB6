@@ -6,6 +6,7 @@
 #include <assert.h>
 #include <limits>
 #include <queue>
+#include <map>
 
 using std::cout;
 using std::endl;
@@ -18,6 +19,7 @@ string outputtracename = inputtracename.substr(0, inputtracename.length() - 4) +
 string hardwareconfigname = "config.txt";
 string RSStringSlotDefault = "NULL";
 string dataReadyMSG = "dataRdy";
+int RSSintSlotDefauly = std::numeric_limits<int>::max();
 enum Operation
 {
 	ADD,
@@ -28,7 +30,7 @@ enum Operation
 	STORE
 };
 // The execute cycle of each operation: ADD, SUB, MULT, DIV, LOAD, STORE
-const int OperationCycle[6] = {2, 2, 10, 40, 2, 2};// OC[ADD] = 2;
+const int OperationCycle[6] = {2, 2, 10, 40, 2, 2};// OC[Opetation.ADD] = 2;
 
 struct HardwareConfig
 {
@@ -107,7 +109,7 @@ struct ReservationStation
     string Vk;
     string Qj;
     string Qk;
-	ReservationStation(string name): name(name){
+    ReservationStation(string name): name(name){
         isBusy = 0;
         opcode = "NULL";
         Vj = "NULL";
@@ -131,15 +133,27 @@ class ReservationStations
 public:
     ReservationStations(vector<Instruction> instructionList,HardwareConfig hardwareConfig):
     instructionList(instructionList),hardwareConfig(hardwareConfig){
+        helperMap.insert(std::make_pair("ADD",Operation::ADD));
+        helperMap.insert(std::make_pair("SUB",Operation::SUB));
+        helperMap.insert(std::make_pair("MULT",Operation::MULT));
+        helperMap.insert(std::make_pair("DIV",Operation::DIV));
+        helperMap.insert(std::make_pair("LOAD",Operation::LOAD));
+        helperMap.insert(std::make_pair("STORE",Operation::STORE));
         initialize();
     };
     void updateRS(){
 
     }
-    //to do
+    //to do这里值传递就好了
     void writeRS(Instruction i){
-
-
+        ReservationStation correctLocation = findRSbyNameAndPointer(i.Opcode);
+        correctLocation.isBusy = 1;
+        correctLocation.remainCycle = OperationCycle[helperMap[i.Opcode]];
+        correctLocation.opcode = i.Opcode;
+        correctLocation.Vj = i.Oprand1;
+        correctLocation.Vk = i.Oprand2;
+        correctLocation.Qk;
+        correctLocation.Qj;//Qk,Qj如何设置???,Desstination用法?似乎和ResultRes有关.
 
     }
 	// ...
@@ -152,6 +166,55 @@ private:
     int loadCounter = 0;
     int mutiCounter = 0;
     int storeCounter = 0;
+    int currentAddRSPointer = 0;
+    int currentLoadRSPointer = 0;
+    int currentMutiRSPointer = 0;
+    int currentStoreRSPointer = 0;
+    std::map<string, Operation> helperMap;
+    //用来初始化中找到合适位置的方法,明明用map要方便一百万倍的.
+    ReservationStation findRSbyNameAndPointer(string Opcodename){
+        ReservationStation toBeRuturnedRS;
+        string RSslotByName;
+        //get the correctpositionname by get a correctname
+        if (Opcodename=="ADD"||Opcodename=="SUB"){
+            RSslotByName = Opcodename+std::to_string(currentAddRSPointer);
+            currentAddRSPointer++;
+
+        }
+        else if(Opcodename=="MULT"||Opcodename=="DIV"){
+            RSslotByName = Opcodename+std::to_string(currentMutiRSPointer);
+            currentMutiRSPointer++;
+        }
+        else if(Opcodename=="LOAD"){
+            RSslotByName = Opcodename+std::to_string(currentLoadRSPointer);
+            currentLoadRSPointer++;
+        }
+        else{
+            RSslotByName = Opcodename+std::to_string(currentStoreRSPointer);
+            currentStoreRSPointer++;
+        }
+
+        auto it = std::find_if(_stations.begin(), _stations.end(), [&RSslotByName](ReservationStation& item) {
+            return item.name == RSslotByName;
+        });
+        return *it;
+    }
+    //update方法似乎无用,但留着先.我一定要有个操作可以减pointer,要不然要出事,howtodo.
+    void updatePointer(Instruction i){
+        if (i.Opcode=="ADD"||i.Opcode=="SUB"){
+            currentAddRSPointer++;
+        }
+        else if(i.Opcode=="MULT"||i.Opcode=="DIV"){
+            currentMutiRSPointer++;
+        }
+        else if(i.Opcode=="LOAD"){
+            currentLoadRSPointer++;
+        }
+        else{
+            currentStoreRSPointer++;
+        }
+
+    }//output, update pointer base on the input type;
     void stationBuilder(){
         for (int i = 0; i < hardwareConfig.AddRSsize; ++i) {
             _stations.push_back(ReservationStation("ADD"+std::to_string(i)));
@@ -215,9 +278,15 @@ private:
         }
             //判断type, 看看满没满,不满写入,满了加入waitList.
         }
-        // to-do
-    void cleanRS(ReservationStation toBeClean){
-
+        // to-do这里必须引用传递
+    void cleanRS(ReservationStation &toBeClean){
+        toBeClean.opcode = RSStringSlotDefault;
+        toBeClean.isBusy = 0;
+        toBeClean.Qj = RSStringSlotDefault;
+        toBeClean.Qk = RSStringSlotDefault;
+        toBeClean.Vj = RSStringSlotDefault;
+        toBeClean.Vk = RSStringSlotDefault;
+        toBeClean.remainCycle = RSSintSlotDefauly;
     }
     void readInsFromWaitlistTop(){
         writeRS(waitList.front());
