@@ -19,7 +19,7 @@ string outputtracename = inputtracename.substr(0, inputtracename.length() - 4) +
 string hardwareconfigname = "config.txt";
 string RSStringSlotDefault = "NULL";
 string dataReadyMSG = "dataRdy";
-int RSSintSlotDefauly = std::numeric_limits<int>::max();
+int RSSintSlotDefault = std::numeric_limits<int>::max();
 enum Operation
 {
 	ADD,
@@ -77,21 +77,34 @@ public:
 	If you don't want to write such a class, then make sure you call the same function and print the register
 	result status in the same format.
 	*/
-	string _printRegisterResultStatus() const
-	{
-		std::ostringstream result;
-		for (int idx = 0; idx < _registers.size(); idx++)
-		{
-			result << "F" + std::to_string(idx) << ": ";
-			result << _registers[idx].ReservationStationName << ", ";
-			result << "dataRdy: " << (_registers[idx].dataReady ? "Y" : "N") << ", ";
-			result << "\n";
-		}
-		return result.str();
-	}
+    // plan to rewrite this fuc cuz I want to use map instead of vector for registers.
+    string _printRegisterResultStatus() const {
+        std::ostringstream result;
+        for (const auto& pair : _registers) {
+            result << pair.first << ": "; // 键（寄存器名称）
+            result << pair.second.ReservationStationName << ", ";
+            result << "dataRdy: " << (pair.second.dataReady ? "Y" : "N") << ", ";
+            result << "\n";
+        }
+        return result.str();
+    }
+	//string _printRegisterResultStatus() const
+	//{
+		//std::ostringstream result;
+		//for (int idx = 0; idx < _registers.size(); idx++)
+		//{
+		//	result << "F" + std::to_string(idx) << ": ";
+		//	result << _registers[idx].ReservationStationName << ", ";
+		//	result << "dataRdy: " << (_registers[idx].dataReady ? "Y" : "N") << ", ";
+		//	result << "\n";
+		//}
+		//return result.str();
+	//}
 /*********************************** ↓↓↓ Todo: Implement by you ↓↓↓ ******************************************/
 private:
-	vector<RegisterResultStatus> _registers;
+    //<register name, status> pair to be imp
+    std::map<string,RegisterResultStatus> _registers;
+	//vector<RegisterResultStatus> _registers;
     HardwareConfig hardwareConfig;
     void initializeRRS(){
 
@@ -109,6 +122,7 @@ struct ReservationStation
     string Vk;
     string Qj;
     string Qk;
+    string destination;
     ReservationStation(string name): name(name){
         isBusy = 0;
         opcode = "NULL";
@@ -116,6 +130,7 @@ struct ReservationStation
         Vk = "NULL";
         Qj = "NULL";
         Qk = "NULL";
+        destination = RSStringSlotDefault;
         remainCycle = std::numeric_limits<int>::max();
     }
     ReservationStation(){
@@ -126,7 +141,16 @@ struct ReservationStation
         Vk = "NULL";
         Qj = "NULL";
         Qk = "NULL";
+        destination = RSStringSlotDefault;
     }
+};
+class CommonDataBus
+{
+public:
+    CommonDataBus(){
+        cout<<"to do"<<endl;
+    }
+    // ...
 };
 class ReservationStations
 {
@@ -154,12 +178,14 @@ public:
         correctLocation.Vk = i.Oprand2;
         correctLocation.Qk;
         correctLocation.Qj;//Qk,Qj如何设置???,Desstination用法?似乎和ResultRes有关.
+        correctLocation.destination =  i.Destination;
 
     }
 	// ...
 private:
 	vector<ReservationStation> _stations;
     std::queue<Instruction> waitList;
+    RegisterResultStatuses RRS;
     vector<Instruction> instructionList;
     HardwareConfig hardwareConfig;
     int addCounter = 0;
@@ -170,6 +196,7 @@ private:
     int currentLoadRSPointer = 0;
     int currentMutiRSPointer = 0;
     int currentStoreRSPointer = 0;
+    CommonDataBus CDB;
     std::map<string, Operation> helperMap;
     //用来初始化中找到合适位置的方法,明明用map要方便一百万倍的.
     ReservationStation findRSbyNameAndPointer(string Opcodename){
@@ -286,7 +313,7 @@ private:
         toBeClean.Qk = RSStringSlotDefault;
         toBeClean.Vj = RSStringSlotDefault;
         toBeClean.Vk = RSStringSlotDefault;
-        toBeClean.remainCycle = RSSintSlotDefauly;
+        toBeClean.remainCycle = RSSintSlotDefault;
     }
     void readInsFromWaitlistTop(){
         writeRS(waitList.front());
@@ -295,11 +322,7 @@ private:
 
 };
 
-class CommonDataBus
-{
-public:
-	// ...
-};
+
 void PrintRegisterResultStatus4Grade(const string &filename,
                                      const RegisterResultStatuses &registerResultStatus,
                                      const int thiscycle)
