@@ -20,6 +20,9 @@ string hardwareconfigname = "config.txt";
 string RSStringSlotDefault = "NULL";
 string dataReadyMSG = "dataRdy";
 int RSSintSlotDefault = std::numeric_limits<int>::max();
+int IsNotimmdiete(string oprand){
+    return oprand[0]=='F';
+}
 enum Operation
 {
 	ADD,
@@ -41,19 +44,54 @@ struct HardwareConfig
 	int FRegSize;	 // number of fp registers
 };
 
+class RegisterResultStatuses;
+class ReservationStations;
+class CommonDataBus
+{
+public:
+    CommonDataBus(){
+
+    }
+    void updateStatusBroadcast(RegisterResultStatuses &_registers, ReservationStations &_stations);
+    struct DataItem {
+        string toBeupdatedOprand1;
+        string toBeupdatedOprand2;
+        string toBeupdatedDes;
+        int originStation;  // 数据来源的保留站标识
+        // 其他可能的属性...
+    };
+    void append(string oprand1, string oprand2, string destination){
+        DataItem temp = DataItem();
+        temp.toBeupdatedOprand1 = oprand1;
+        temp.toBeupdatedOprand2 = oprand2;
+        temp.toBeupdatedDes = destination;
+    }
+private:
+
+    std::vector<DataItem> dataItems;  // 存储数据项
+    // 其他成员变量...
+};
 // We use the following structure to record the time of each instruction
 struct InstructionStatus
 {
-	int cycleIssued;
-	int cycleExecuted; // execution completed
-	int cycleWriteResult;
+    int cycleIssued;
+    int cycleExecuted; // execution completed
+    int cycleWriteResult;
 };
 
 // Register Result Status structure
 struct RegisterResultStatus
 {
-	string ReservationStationName;
-	bool dataReady;
+    string ReservationStationName;
+    int dataReady;
+    RegisterResultStatus(){
+        ReservationStationName="";
+        dataReady=1;
+    }
+    RegisterResultStatus(string name, int dataReady){
+        this->ReservationStationName = name;
+        this->dataReady = dataReady;
+    }
 };
 
 /*********************************** ↓↓↓ Todo: Implement by you ↓↓↓ ******************************************/
@@ -66,10 +104,23 @@ struct Instruction{
     //Opcode(Opcode),Destination(Destination),Oprand1(Oprand1),Oprand2(Oprand2){}
 };
 
+
+
 class RegisterResultStatuses
 {
 public:
+    RegisterResultStatus getOrDefaultInRS( const string& name, const RegisterResultStatus& defaultValue) {
+        auto it = _registers.find(name);
+        return it != _registers.end() ? it->second : defaultValue;
+    }
 	// ...
+    RegisterResultStatuses(HardwareConfig hardwareConfig){
+        this->hardwareConfig = hardwareConfig;
+        for (int i = 0; i < hardwareConfig.FRegSize; ++i) {
+            _registers.insert(std::make_pair("F"+std::to_string(i),RegisterResultStatus()));
+            cout<<"F"+std::to_string(i)<<endl;
+        }
+    }
 
 /*********************************** ↑↑↑ Todo: Implement by you ↑↑↑ ******************************************/
 	/*
@@ -88,6 +139,18 @@ public:
         }
         return result.str();
     }
+    void updateDatabus(CommonDataBus& cbd){
+
+
+    }
+
+    //迷惑的顺序???????似乎已经在RRS里实现了,你这两个类已经贴贴到负距离了.
+   // void writeInstruction(Instruction tobeIssued){
+       // toBeIssued = tobeIssued;
+        //string destination = toBeIssued.Destination;
+        //string oprand1 = toBeIssued.Oprand1;
+        //string oprand2 = toBeIssued.Oprand2;
+    //}
 	//string _printRegisterResultStatus() const
 	//{
 		//std::ostringstream result;
@@ -101,14 +164,45 @@ public:
 		//return result.str();
 	//}
 /*********************************** ↓↓↓ Todo: Implement by you ↓↓↓ ******************************************/
+    void updateFromCDB(string registerName) {
+       _registers[registerName].dataReady = 1;
+       _registers[registerName].ReservationStationName = "";
+    }
+    void updateByName(string registerName, int dataRdy, string reservationStationName){
+        _registers[registerName].dataReady = dataRdy;
+        _registers[registerName].ReservationStationName = reservationStationName;
+    }
+    RegisterResultStatus findByName(string registerName){
+        auto it = _registers.find(registerName);  // 使用 find 方法寻找键
+
+        if (it != _registers.end()) {
+            // 如果找到了键，更新对应的值
+            return it->second;
+        }
+        else{
+            return RegisterResultStatus();
+        }
+    }
+
+
 private:
     //<register name, status> pair to be imp
     std::map<string,RegisterResultStatus> _registers;
 	//vector<RegisterResultStatus> _registers;
     HardwareConfig hardwareConfig;
-    void initializeRRS(){
+    //需要流操作,似乎不需要List,
+    Instruction toBeIssued;
+    RegisterResultStatus ready = RegisterResultStatus(dataReadyMSG,1);
 
+    //vector<Instruction> instructionList;??这是在干啥
+    void updateIfFound(string registerName){
+        auto it = _registers.find(registerName);
+        if (it != _registers.end()) {
+            // 键被找到，执行相关操作
+
+        }
     }
+
 };
 
 // Define your Reservation Station structure
@@ -123,6 +217,10 @@ struct ReservationStation
     string Qj;
     string Qk;
     string destination;
+    int issueCycle = -1;    // 发射周期
+    int executeCycle = -1;  // 执行开始的周期
+    int writeBackCycle = -1; // 写回周期
+
     ReservationStation(string name): name(name){
         isBusy = 0;
         opcode = "NULL";
@@ -144,72 +242,137 @@ struct ReservationStation
         destination = RSStringSlotDefault;
     }
 };
-class CommonDataBus
-{
-public:
-    CommonDataBus(){
-        cout<<"to do"<<endl;
-    }
-    // ...
-};
+
 class ReservationStations
 {
 public:
-    ReservationStations(vector<Instruction> instructionList,HardwareConfig hardwareConfig):
-    instructionList(instructionList),hardwareConfig(hardwareConfig){
+    //什么sb抽象数据结构
+    vector<std::pair<std::pair<Instruction,InstructionStatus>,ReservationStation>> IRtable;
+    ReservationStations(HardwareConfig hardwareConfig,RegisterResultStatuses RRS,vector<std::pair<Instruction,InstructionStatus>>& InsTable):
+    hardwareConfig(hardwareConfig),RRS(RRS){
         helperMap.insert(std::make_pair("ADD",Operation::ADD));
         helperMap.insert(std::make_pair("SUB",Operation::SUB));
         helperMap.insert(std::make_pair("MULT",Operation::MULT));
         helperMap.insert(std::make_pair("DIV",Operation::DIV));
         helperMap.insert(std::make_pair("LOAD",Operation::LOAD));
         helperMap.insert(std::make_pair("STORE",Operation::STORE));
-        initialize();
+        for (std::pair<Instruction,InstructionStatus>& csndm:InsTable) {
+            IRtable.emplace_back(std::make_pair(csndm, ReservationStation()));
+        }
+        stationBuilder();
     };
-    void updateRS(){
+    void updateRS(int currentCycle){
+        updateRSBasedOnRegisterStatus();
+        for(ReservationStation& i: _stations){
+            if(i.Qj==RSStringSlotDefault&&i.Qk==RSStringSlotDefault){
+                i.remainCycle--;
+            }
+            //这里ExcuteT
+            if(i.remainCycle==0){
+                i.executeCycle = currentCycle;
+                i.writeBackCycle = i.executeCycle+1;
+                updateDatabus(cbd,i);
+                cleanRS(i);
+                //code to clean and boardcast
+            }
+        }
+
 
     }
-    //to do这里值传递就好了
-    void writeRS(Instruction i){
-        ReservationStation correctLocation = findRSbyNameAndPointer(i.Opcode);
-        correctLocation.isBusy = 1;
-        correctLocation.remainCycle = OperationCycle[helperMap[i.Opcode]];
-        correctLocation.opcode = i.Opcode;
-        correctLocation.Vj = i.Oprand1;
-        correctLocation.Vk = i.Oprand2;
-        correctLocation.Qk;
-        correctLocation.Qj;//Qk,Qj如何设置???,Desstination用法?似乎和ResultRes有关.
-        correctLocation.destination =  i.Destination;
+    void updateDatabus(CommonDataBus& cbd,ReservationStation i){
+        cbd.append(i.Vj,i.Vk,i.destination);
+    }
+    //我要干什么:遍历一边所有保存站:如果vk和vj在Register中找到,则更新qj和qk
+    void updateRSBasedOnRegisterStatus(){
+        for(ReservationStation& i:_stations){
+            if(i.isBusy) {
+                RRS.updateByName(i.destination, 0, i.name);
+                //如果source oprand的data不ready,更新,不然还是NULL'
+                if(IsNotimmdiete(i.Vj)&&RRS.findByName(i.Vj).dataReady==0) {
+                    i.Qj = RRS.findByName(i.Vj).ReservationStationName;
+                }
+                else{
+                    i.Qj = RSStringSlotDefault;
+                }
+                if(IsNotimmdiete(i.Vj)&&RRS.findByName(i.Vj).dataReady==0) {
+                    i.Qk = RRS.findByName(i.Vj).ReservationStationName;
+                }
+                else{
+                    i.Qk = RSStringSlotDefault;
+                }
+            }
+        }
 
+    }
+    int findIndexByReservationStation(ReservationStation& station) {
+        for (size_t i = 0; i < IRtable.size(); ++i) {
+            if (IRtable[i].second.name == station.name) { // 比较 ReservationStation
+                return i;
+            }
+        }
+        return -1; // 没有找到
+    }
+
+    //to do这里值传递就好了//为了更新状态,这里要怎么做,这里issueT
+    void writeRS(Instruction i, int currentCycle){
+
+        ReservationStation* correctLocation = findRSbyNameAndPointer(i.Opcode);
+        //建立映射
+
+        if(findIndexByReservationStation(*correctLocation)!=-1){
+            IRtable[findIndexByReservationStation(*correctLocation)].first.second.cycleIssued;
+        }
+        cout<<correctLocation->name<<endl;
+        correctLocation->isBusy = 1;
+        correctLocation->issueCycle = currentCycle;
+        correctLocation->remainCycle = OperationCycle[helperMap[i.Opcode]];
+        correctLocation->opcode = i.Opcode;
+        correctLocation->Vj = i.Oprand1;
+        correctLocation->Vk = i.Oprand2;
+       //Qk,Qj如何设置???,Desstination用法?似乎和ResultRes有关.//这里就先载进去,Qk,Qj不管,
+        correctLocation->destination =  i.Destination;
+
+    }
+    void printAll(){
+        for(ReservationStation rs:_stations){
+            cout<<rs.name<<rs.opcode<<rs.isBusy<<rs.Vk<<rs.destination<<rs.Vj<<rs.Qj<<rs.Vk<<rs.remainCycle<<endl;
+        }
     }
 	// ...
+    void findAndSetForQJQK(string RGST) {
+        for(ReservationStation &i:_stations){
+            if(i.Vk==RGST){
+                i.Vk = RSStringSlotDefault;
+            }
+            if(i.Vj==RGST){
+                i.Vj = RSStringSlotDefault;
+            }
+        }
+
+    }
+
 private:
 	vector<ReservationStation> _stations;
-    std::queue<Instruction> waitList;
     RegisterResultStatuses RRS;
-    vector<Instruction> instructionList;
     HardwareConfig hardwareConfig;
-    int addCounter = 0;
-    int loadCounter = 0;
-    int mutiCounter = 0;
-    int storeCounter = 0;
+    CommonDataBus cbd;
     int currentAddRSPointer = 0;
     int currentLoadRSPointer = 0;
     int currentMutiRSPointer = 0;
     int currentStoreRSPointer = 0;
-    CommonDataBus CDB;
     std::map<string, Operation> helperMap;
     //用来初始化中找到合适位置的方法,明明用map要方便一百万倍的.
-    ReservationStation findRSbyNameAndPointer(string Opcodename){
+    ReservationStation* findRSbyNameAndPointer(string Opcodename){
         ReservationStation toBeRuturnedRS;
         string RSslotByName;
         //get the correctpositionname by get a correctname
         if (Opcodename=="ADD"||Opcodename=="SUB"){
-            RSslotByName = Opcodename+std::to_string(currentAddRSPointer);
+            RSslotByName = "ADD"+std::to_string(currentAddRSPointer);
             currentAddRSPointer++;
 
         }
         else if(Opcodename=="MULT"||Opcodename=="DIV"){
-            RSslotByName = Opcodename+std::to_string(currentMutiRSPointer);
+            RSslotByName = "MULT"+std::to_string(currentMutiRSPointer);
             currentMutiRSPointer++;
         }
         else if(Opcodename=="LOAD"){
@@ -224,7 +387,7 @@ private:
         auto it = std::find_if(_stations.begin(), _stations.end(), [&RSslotByName](ReservationStation& item) {
             return item.name == RSslotByName;
         });
-        return *it;
+        return &(*it);
     }
     //update方法似乎无用,但留着先.我一定要有个操作可以减pointer,要不然要出事,howtodo.
     void updatePointer(Instruction i){
@@ -247,78 +410,41 @@ private:
             _stations.push_back(ReservationStation("ADD"+std::to_string(i)));
         }
         for (int i = 0; i < hardwareConfig.MultRSsize; ++i) {
-            _stations.push_back(ReservationStation("ADD"+std::to_string(i)));
+            _stations.push_back(ReservationStation("MULT"+std::to_string(i)));
         }
         for (int i = 0; i < hardwareConfig.LoadRSsize; ++i) {
-            _stations.push_back(ReservationStation("ADD"+std::to_string(i)));
+            _stations.push_back(ReservationStation("LOAD"+std::to_string(i)));
         }
         for (int i = 0; i < hardwareConfig.StoreRSsize; ++i) {
-            _stations.push_back(ReservationStation("ADD"+std::to_string(i)));
+            _stations.push_back(ReservationStation("STORE"+std::to_string(i)));
         }
     }
-    void initialize(){
-        stationBuilder();
-        for(Instruction i:instructionList){
-            if(i.Opcode=="ADD"||i.Opcode=="SUB"){
-                if(addCounter<=hardwareConfig.AddRSsize){
-                    writeRS(i);
-                    addCounter++;
-                }
-                else{
-                    waitList.push(i);
-                }
+
+    void cleanRS(ReservationStation &toBeClean){
+
+        int currentPointer = toBeClean.name.back() - '0';
+            if (toBeClean.opcode=="ADD"||toBeClean.opcode=="SUB"){
+                currentAddRSPointer = currentPointer;
 
             }
-            else if(i.Opcode=="MULT"||i.Opcode=="DIV"){
-                if(mutiCounter<=hardwareConfig.MultRSsize){
-                    writeRS(i);
-                    mutiCounter++;
-                }
-                else{
-                    waitList.push(i);
-                }
-
-
+            else if(toBeClean.opcode=="MULT"||toBeClean.opcode=="DIV"){
+                currentMutiRSPointer=currentPointer;
             }
-            else if(i.Opcode=="LOAD"){
-                if(loadCounter<=hardwareConfig.LoadRSsize){
-                    writeRS(i);
-                    loadCounter++;
-                }
-                else{
-                    waitList.push(i);
-                }
-
-
+            else if(toBeClean.opcode=="LOAD"){
+                currentLoadRSPointer = currentPointer;
             }
             else{
-                if(storeCounter<=hardwareConfig.StoreRSsize){
-                    writeRS(i);
-                    storeCounter++;
-                }
-                else{
-                    waitList.push(i);
-                }
-
-
+                currentStoreRSPointer = currentPointer;
             }
-        }
-            //判断type, 看看满没满,不满写入,满了加入waitList.
-        }
-        // to-do这里必须引用传递
-    void cleanRS(ReservationStation &toBeClean){
-        toBeClean.opcode = RSStringSlotDefault;
-        toBeClean.isBusy = 0;
-        toBeClean.Qj = RSStringSlotDefault;
-        toBeClean.Qk = RSStringSlotDefault;
-        toBeClean.Vj = RSStringSlotDefault;
-        toBeClean.Vk = RSStringSlotDefault;
-        toBeClean.remainCycle = RSSintSlotDefault;
+            toBeClean.opcode = RSStringSlotDefault;
+            toBeClean.isBusy = 0;
+            toBeClean.Qj = RSStringSlotDefault;
+            toBeClean.Qk = RSStringSlotDefault;
+            toBeClean.Vj = RSStringSlotDefault;
+            toBeClean.Vk = RSStringSlotDefault;
+            toBeClean.remainCycle = RSSintSlotDefault;
     }
-    void readInsFromWaitlistTop(){
-        writeRS(waitList.front());
-        waitList.pop();
-    }
+
 
 };
 
@@ -349,14 +475,45 @@ void PrintResult4Grade(const string &filename, const vector<InstructionStatus> &
     outfile.close();
 }
 // Function to simulate the Tomasulo algorithm
-void simulateTomasulo()
-{
+//这里 writeBackT.
+void CommonDataBus::updateStatusBroadcast(RegisterResultStatuses &_registers, ReservationStations &_stations){
+    for(DataItem i: dataItems){
+        if(i.toBeupdatedDes.at(0)=='F'){
+            _registers.updateFromCDB(i.toBeupdatedDes);
+        }
+        _stations.findAndSetForQJQK(i.toBeupdatedOprand1);
+        _stations.findAndSetForQJQK(i.toBeupdatedOprand2);
+        _stations.findAndSetForQJQK(i.toBeupdatedDes);
 
+    }
+}
+//input 指针
+void simulateTomasulo(vector<InstructionStatus> &instructionStatus, vector<Instruction> insQ,
+                      RegisterResultStatuses &_register, ReservationStations &_rrs,CommonDataBus &CDB)
+{
+    vector<std::pair<Instruction,InstructionStatus>> insTable;
 	int thiscycle = 1; // start cycle: 1
-	RegisterResultStatuses registerResultStatus;
+    //建立空的
+    for(int i = 0;i<insQ.size();i++){
+        instructionStatus.push_back(InstructionStatus());
+    }
+    for(int i = 0;i<insQ.size();i++){
+        insTable.emplace_back(insQ[i],instructionStatus[i]);
+    }
+
+
+
+
 
 	while (thiscycle < 100000000)
 	{
+        CDB.updateStatusBroadcast(_register,_rrs);
+        //step 1 CDB updates//记录writeresult时间,更新RRS和RS.
+        _rrs.updateRS();
+
+        //step 2 Check RS and do the calculation
+        //step 3 for any available RS, load an instruction.//queue instead of vector.
+
 
 		// Reservation Stations should be updated every cycle, and broadcast to Common Data Bus
 		// ...
@@ -365,7 +522,7 @@ void simulateTomasulo()
 		// ...
 
 		// At the end of this cycle, we need this function to print all registers status for grading
-		PrintRegisterResultStatus4Grade(outputtracename, registerResultStatus, thiscycle);
+		PrintRegisterResultStatus4Grade(outputtracename, _register, thiscycle);
 
 		++thiscycle;
 
@@ -390,7 +547,7 @@ print the register result status each 5 cycles
 @param thiscycle: current cycle
 */
 vector<Instruction> readInstructionFromFile(string inputtracename){
-    vector<Instruction> instructionVector;
+    vector<Instruction> Instructions;
     std::ifstream trace;
     trace.open(inputtracename);
     string line;
@@ -402,14 +559,14 @@ vector<Instruction> readInstructionFromFile(string inputtracename){
         iss>>tobeAdded.Destination;
         iss>>tobeAdded.Oprand1;
         iss>>tobeAdded.Oprand2;
-        instructionVector.push_back(tobeAdded);
+        Instructions.push_back(tobeAdded);
 
     }
     //for (auto it = instructionVector.begin(); it != instructionVector.end(); ++it) {
         //cout<<it->Opcode<<it->Destination<<it->Oprand1<<it->Oprand2<<endl;
         // 使用 *it 访问元素
     //}
-    return instructionVector;
+    return Instructions;
 }
 
 
@@ -429,21 +586,23 @@ int main(int argc, char **argv)
 	config >> hardwareConfig.AddRSsize;	  // number of add reservation stations
 	config >> hardwareConfig.MultRSsize;  // number of multiply reservation stations
 	config >> hardwareConfig.FRegSize;	  // number of fp registers
+
 	config.close();
 
 /*********************************** ↓↓↓ Todo: Implement by you ↓↓↓ ******************************************/
-    vector<Instruction> insList = readInstructionFromFile(inputtracename);
+    vector<Instruction> insQ = readInstructionFromFile(inputtracename);
 	// Read instructions from a file (replace 'instructions.txt' with your file name)
 	// ...
-
 	// Initialize the register result status
-	// RegisterResultStatuses registerResultStatus();
+	RegisterResultStatuses registerResultStatuses = RegisterResultStatuses(hardwareConfig);
 	// ...
+    ReservationStations RS = ReservationStations(hardwareConfig,registerResultStatuses);
+    CommonDataBus CDB = CommonDataBus();
 
 	// Initialize the instruction status table
 	vector<InstructionStatus> instructionStatus;
 	// ...
-
+    simulateTomasulo(instructionStatus,insQ,registerResultStatuses,RS,CDB);
 	// Simulate Tomasulo:
 	// simulateTomasulo(registerResultStatus, instructionStatus, ...);
 
