@@ -100,6 +100,11 @@ struct Instruction{
     string Destination;
     string Oprand1;
     string Oprand2;
+    bool operator==(const Instruction& other) const {
+        // 根据需要比较的属性进行比较
+        return Opcode == other.Opcode&& Destination == other.Destination&& Oprand2 == other.Oprand2&& Oprand1 == other.Oprand1;
+        // 如果还有其他需要比较的属性，可以在这里继续添加比较逻辑
+    }
     //Instruction(string Opcode, string Destination, string Oprand1, string Oprand2):
     //Opcode(Opcode),Destination(Destination),Oprand1(Oprand1),Oprand2(Oprand2){}
 };
@@ -261,19 +266,29 @@ public:
         }
         stationBuilder();
     };
+    //耦合成抹了 迫真屎山代码
+    void updateInsTable(vector<std::pair<Instruction,InstructionStatus>>& InsTable){
+        for(int i = 0;i<InsTable.size();i++){
+            InsTable[i].second = IRtable[i].first.second;
+        }
+
+    }
     void updateRS(int currentCycle){
         updateRSBasedOnRegisterStatus();
         for(ReservationStation& i: _stations){
+            if(i.isBusy){
+                int TableIndex = findIndexByReservationStation(i);
             if(i.Qj==RSStringSlotDefault&&i.Qk==RSStringSlotDefault){
                 i.remainCycle--;
             }
             //这里ExcuteT
             if(i.remainCycle==0){
-                i.executeCycle = currentCycle;
-                i.writeBackCycle = i.executeCycle+1;
+                IRtable[TableIndex].first.second.cycleExecuted = currentCycle;
+                IRtable[TableIndex].first.second.cycleWriteResult = currentCycle+1;//偷个小懒问题不大.
                 updateDatabus(cbd,i);
                 cleanRS(i);
                 //code to clean and boardcast
+            }
             }
         }
 
@@ -312,16 +327,22 @@ public:
         }
         return -1; // 没有找到
     }
+    int findIndexByInstruction(Instruction& instruction) {
+        for (size_t i = 0; i < IRtable.size(); ++i) {
+            if (IRtable[i].first.first == instruction) { // 比较 ReservationStation
+                return i;
+            }
+        }
+        return -1; // 没有找到
+    }
 
     //to do这里值传递就好了//为了更新状态,这里要怎么做,这里issueT
     void writeRS(Instruction i, int currentCycle){
-
+        int tableIndex = findIndexByInstruction(i);
         ReservationStation* correctLocation = findRSbyNameAndPointer(i.Opcode);
         //建立映射
-
-        if(findIndexByReservationStation(*correctLocation)!=-1){
-            IRtable[findIndexByReservationStation(*correctLocation)].first.second.cycleIssued;
-        }
+        IRtable[tableIndex].second = *correctLocation;
+        IRtable[tableIndex].first.second.cycleIssued = currentCycle;
         cout<<correctLocation->name<<endl;
         correctLocation->isBusy = 1;
         correctLocation->issueCycle = currentCycle;
@@ -488,30 +509,18 @@ void CommonDataBus::updateStatusBroadcast(RegisterResultStatuses &_registers, Re
     }
 }
 //input 指针
-void simulateTomasulo(vector<InstructionStatus> &instructionStatus, vector<Instruction> insQ,
+void simulateTomasulo(vector<InstructionStatus> &instructionStatus, vector<std::pair<Instruction,InstructionStatus>> insTable,
                       RegisterResultStatuses &_register, ReservationStations &_rrs,CommonDataBus &CDB)
 {
-    vector<std::pair<Instruction,InstructionStatus>> insTable;
-	int thiscycle = 1; // start cycle: 1
-    //建立空的
-    for(int i = 0;i<insQ.size();i++){
-        instructionStatus.push_back(InstructionStatus());
-    }
-    for(int i = 0;i<insQ.size();i++){
-        insTable.emplace_back(insQ[i],instructionStatus[i]);
-    }
-
-
-
-
-
+  int thiscycle = 1;
+  int insTableIndex = 0;
 	while (thiscycle < 100000000)
 	{
         CDB.updateStatusBroadcast(_register,_rrs);
         //step 1 CDB updates//记录writeresult时间,更新RRS和RS.
-        _rrs.updateRS();
-
+        _rrs.updateRS(thiscycle);
         //step 2 Check RS and do the calculation
+        _rrs.writeRS(insTable[insTableIndex].first,thiscycle);
         //step 3 for any available RS, load an instruction.//queue instead of vector.
 
 
@@ -520,7 +529,7 @@ void simulateTomasulo(vector<InstructionStatus> &instructionStatus, vector<Instr
 
 		// Issue new instruction in each cycle
 		// ...
-
+        _rrs.updateInsTable(insTable);
 		// At the end of this cycle, we need this function to print all registers status for grading
 		PrintRegisterResultStatus4Grade(outputtracename, _register, thiscycle);
 
@@ -590,19 +599,30 @@ int main(int argc, char **argv)
 	config.close();
 
 /*********************************** ↓↓↓ Todo: Implement by you ↓↓↓ ******************************************/
+    vector<InstructionStatus> instructionStatus;
     vector<Instruction> insQ = readInstructionFromFile(inputtracename);
-	// Read instructions from a file (replace 'instructions.txt' with your file name)
+    vector<std::pair<Instruction,InstructionStatus>> insTable;
+    int thiscycle = 1; // start cycle: 1
+    //建立空的
+    for(int i = 0;i<insQ.size();i++){
+        instructionStatus.push_back(InstructionStatus());
+    }
+    for(int i = 0;i<insQ.size();i++){
+        insTable.emplace_back(insQ[i],instructionStatus[i]);
+    }
+
+    // Read instructions from a file (replace 'instructions.txt' with your file name)
 	// ...
 	// Initialize the register result status
 	RegisterResultStatuses registerResultStatuses = RegisterResultStatuses(hardwareConfig);
 	// ...
-    ReservationStations RS = ReservationStations(hardwareConfig,registerResultStatuses);
+    ReservationStations RS = ReservationStations(hardwareConfig,registerResultStatuses,insTable);
     CommonDataBus CDB = CommonDataBus();
 
 	// Initialize the instruction status table
-	vector<InstructionStatus> instructionStatus;
+
 	// ...
-    simulateTomasulo(instructionStatus,insQ,registerResultStatuses,RS,CDB);
+    simulateTomasulo(instructionStatus,insTable,registerResultStatuses,RS,CDB);
 	// Simulate Tomasulo:
 	// simulateTomasulo(registerResultStatus, instructionStatus, ...);
 
