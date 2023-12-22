@@ -107,7 +107,7 @@ public:
         bool operator()(const DataItem& a, const DataItem& b) const {
             // 自定义比较逻辑
             // 例如，对于整数，可以比较它们的绝对值
-            return a.i->issueCycle<b.i->issueCycle;
+            return a.i->issueCycle>=b.i->issueCycle;
         }
     };
 
@@ -454,25 +454,23 @@ public:
     }
 	// ...
     //代码有大问题
-    void findAndSetForQJQK(ReservationStation& writingBackStation,string RGST) {
+    void findAndSetForQJQK(string RGST) {
         for(ReservationStation &i:_stations){
-            //if(RRS.findByName(RGST).ReservationStationName!="") {
-                //if (i.Vk == RGST) {
-                    //i.Qk = RSStringSlotDefault;
-                //}
-                //if (i.Vj == RGST) {
-                    //i.Qj = RSStringSlotDefault;
-                //}
-            //}
-            if(i.Qk==writingBackStation.name){
-                i.Qk = RSStringSlotDefault;
+                if (i.Vk == RGST) {
+                    i.Qk = RSStringSlotDefault;
+                }
+                if (i.Vj == RGST) {
+                    i.Qj = RSStringSlotDefault;
+                }
+            //if(i.Qk==writingBackStation.name){
+                //i.Qk = RSStringSlotDefault;
 
-            }
-            if(i.Qj==writingBackStation.name){
-                i.Qj = RSStringSlotDefault;
-            }
-            writingBackStation.Qj = RSStringSlotDefault;
-            writingBackStation.Qk = RSStringSlotDefault;
+            //}
+            //if(i.Qj==writingBackStation.name){
+                //i.Qj = RSStringSlotDefault;
+            //}
+            //writingBackStation.Qj = RSStringSlotDefault;
+            //writingBackStation.Qk = RSStringSlotDefault;
 
         }
 
@@ -486,6 +484,7 @@ public:
         IRtable[IRtableIndex].second = new ReservationStation();
         toBeClean.opcode = RSStringSlotDefault;
         toBeClean.isBusy = 0;
+        toBeClean.destination = RSStringSlotDefault;
         toBeClean.Qj = RSStringSlotDefault;
         toBeClean.Qk = RSStringSlotDefault;
         toBeClean.Vj = RSStringSlotDefault;
@@ -588,15 +587,15 @@ void CommonDataBus::updateStatusBroadcast(RegisterResultStatuses &_registers, Re
                     if(i.i->opcode!="STORE") {
                         _registers.updateFromCDB(i.toBeupdatedDes);
                     }
-
                 }
                 int index = _stations.findIndexByReservationStation(*i.i);
+                cout<<"res index "<<index<<endl;
                 if (index != -1) {
                     _stations.IRtable[index].first.second.cycleWriteResult = currentCycle;
                 }
-                _stations.findAndSetForQJQK(*i.i,i.toBeupdatedOprand1);
-
-
+            _stations.findAndSetForQJQK(i.toBeupdatedOprand1);
+            _stations.findAndSetForQJQK(i.toBeupdatedOprand2);
+            _stations.findAndSetForQJQK(i.toBeupdatedDes);
                 _stations.cleanRS(*i.i);
                 dataItems.pop();
         }
