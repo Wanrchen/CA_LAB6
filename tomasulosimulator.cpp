@@ -236,12 +236,12 @@ public:
        //_registers[registerName].ReservationStationName = "";
     }
     void updateByName(string registerName, int dataRdy, string reservationStationName){
-        cout<<"runnig UBN"<<registerName<<dataRdy<<reservationStationName<<endl;
+        cout<<"updating "<<_registers[registerName].ReservationStationName+" " <<registerName+" "<<dataRdy +" "<<reservationStationName+" "<<endl;
         _registers[registerName].dataReady = dataRdy;
         _registers[registerName].ReservationStationName = reservationStationName;
         cout<<registerName<<"\t"<<_registers[registerName].dataReady<<"\t"<<_registers[registerName].ReservationStationName<<endl;
     }
-    RegisterResultStatus findByName(string registerName){
+    RegisterResultStatus& findByName(string registerName){
         auto it = _registers.find(registerName);  // 使用 find 方法寻找键
 
         if (it != _registers.end()) {
@@ -249,7 +249,7 @@ public:
             return it->second;
         }
         else{
-            return RegisterResultStatus();
+            throw std::out_of_range("Register name not found: " + registerName);
         }
     }
 
@@ -334,13 +334,13 @@ public:
         //set is busy ==0 出问题了
         //先筛一边
         //看起来对于QJQK的更新仍有问题
-
+        cout<<"trying update"<<endl;
         for (ReservationStation &i: _stations) {
             if (i.isBusy) {
                 //这部分应该还有问题
-                bool isUpdated = false;
+                bool isUpdated = false;//we
                 int TableIndex = findIndexByReservationStation(i);
-                //cout << "doing updating " << TableIndex << "\t" << i.opcode << i.remainCycle<<endl;
+                cout << "doing updating " << TableIndex << "" << i.opcode << i.remainCycle<<" "<<isUpdated<<" "<<i.isOperandsReady<<endl;
                 //应该是这句有问题
                 if (!i.isOperandsReady) {
                     if (i.Qj == RSStringSlotDefault && i.Qk == RSStringSlotDefault) {
@@ -367,28 +367,25 @@ public:
         cbd.append(i.Vj,i.Vk,i.destination,&i);
     }
     //我要干什么:遍历一边所有保存站:如果vk和vj在Register中找到,则更新qj和qk
-    void updateRSBasedOnRegisterStatusForIssue(){
+    void updateRSBasedOnRegisterStatusForIssue(ReservationStation& i){
         //直接调用这个在wb阶段会让所有的des的
-        for(ReservationStation& i:_stations){
-            if(i.isBusy) {
                 RRS.updateByName(i.destination, 0, i.name);
                 //如果source oprand的data不ready,更新,不然还是NULL'
-                if(IsNotimmdiete(i.Vj)&&RRS.findByName(i.Vj).dataReady==0) {
+                if(IsNotimmdiete(i.Vj)&&RRS.findByName(i.Vj).dataReady==0&&RRS.findByName(i.Vj).ReservationStationName!="") {
                     i.Qj = RRS.findByName(i.Vj).ReservationStationName;
                 }
                 else{
                     i.Qj = RSStringSlotDefault;
                 }
-                if(IsNotimmdiete(i.Vk)&&RRS.findByName(i.Vk).dataReady==0) {
+                if(IsNotimmdiete(i.Vk)&&RRS.findByName(i.Vk).dataReady==0&&RRS.findByName(i.Vk).ReservationStationName!="") {
                     i.Qk = RRS.findByName(i.Vk).ReservationStationName;
                 }
                 else{
                     i.Qk = RSStringSlotDefault;
                 }
-            }
+                cout<<"QJQK now "<<i.Qj<<" "<<i.Qk<<endl;
         }
 
-    }
     int findIndexByReservationStation(ReservationStation& station) {
         for (size_t i = 0; i < IRtable.size(); ++i) {
             if (IRtable[i].second->name == station.name) { // 比较 ReservationStation
@@ -414,37 +411,38 @@ public:
         return 1;
     }
     //to do这里值传递就好了//为了更新状态,这里要怎么做,这里issueT
+    //目前的问题是
     void writeRS(Instruction i, int currentCycle){
         //这个方法有问题
         int tableIndex = findIndexByInstruction(i);
         cout<<tableIndex<<endl;
-        ReservationStation* correctLocation = findRSbyNameAndPointer(i.Opcode);
+        ReservationStation& correctLocation = findRSbyNameAndPointer(i.Opcode);
         //建立映射这个sb映射可能有问题
-        IRtable[tableIndex].second = correctLocation;
+        IRtable[tableIndex].second = &correctLocation;
         IRtable[tableIndex].first.second.cycleIssued = currentCycle;
-        cout<<"issued Location"<<correctLocation->name<<"\t"<<i.Opcode<<endl;
-        correctLocation->isBusy = 1;
-        correctLocation->remainCycle = OperationCycle[helperMap[i.Opcode]];
-        correctLocation->opcode = i.Opcode;
+        cout<<"issued Location "<<correctLocation.name<<"\t"<<i.Opcode<<endl;
+        correctLocation.isBusy = 1;
+        cout<<correctLocation.isBusy<<endl;
+        correctLocation.remainCycle = OperationCycle[helperMap[i.Opcode]];
+        correctLocation.opcode = i.Opcode;
         if(IsNotimmdiete(i.Oprand1)) {
-            correctLocation->Vj = i.Oprand1;
+            correctLocation.Vj = i.Oprand1;
         }
         if(IsNotimmdiete(i.Oprand2)) {
-            correctLocation->Vk = i.Oprand2;
+            correctLocation.Vk = i.Oprand2;
         }
-        correctLocation->destination =  i.Destination;
-        correctLocation->issueCycle = currentCycle;
-        cout<<correctLocation->name+"  "<<correctLocation->remainCycle<<endl;
-        //cbd.append(RSStringSlotDefault,RSStringSlotDefault,RSStringSlotDefault,correctLocation,0);
-        updateRSBasedOnRegisterStatusForIssue();
-        if(correctLocation->Qj!=RSStringSlotDefault||correctLocation->Qk!=RSStringSlotDefault){
-            correctLocation->isOperandsReady = false;
+        correctLocation.destination =  i.Destination;
+        correctLocation.issueCycle = currentCycle;
+        cout<<"new issued RS: "<<correctLocation.name+"  "<<correctLocation.remainCycle<<endl;
+        updateRSBasedOnRegisterStatusForIssue(correctLocation);
+        if(correctLocation.Qj!=RSStringSlotDefault||correctLocation.Qk!=RSStringSlotDefault){
+            correctLocation.isOperandsReady = false;
         }
 
     }
     void printAll(){
-        for(ReservationStation rs:_stations){
-            cout<<rs.name<<rs.opcode<<rs.isBusy<<rs.Vk<<rs.destination<<rs.Vj<<rs.Qj<<rs.Vk<<rs.remainCycle<<endl;
+        for(const ReservationStation& rs:_stations){
+            cout<<rs.name+" "<<rs.opcode+" "<<std::to_string(rs.isBusy)+" "<<rs.destination+" "<<rs.Vk+" "<<rs.Vj+" "<<rs.Qj+" "<<rs.Qk+" "<<std::to_string(rs.remainCycle)+" "<<std::to_string(rs.issueCycle)+" "<<endl;
         }
     }
     void checkBusy(){
@@ -455,14 +453,27 @@ public:
         }
     }
 	// ...
-    void findAndSetForQJQK(string RGST) {
+    //代码有大问题
+    void findAndSetForQJQK(ReservationStation& writingBackStation,string RGST) {
         for(ReservationStation &i:_stations){
-            if(i.Vk==RGST){
+            //if(RRS.findByName(RGST).ReservationStationName!="") {
+                //if (i.Vk == RGST) {
+                    //i.Qk = RSStringSlotDefault;
+                //}
+                //if (i.Vj == RGST) {
+                    //i.Qj = RSStringSlotDefault;
+                //}
+            //}
+            if(i.Qk==writingBackStation.name){
                 i.Qk = RSStringSlotDefault;
+
             }
-            if(i.Vj==RGST){
+            if(i.Qj==writingBackStation.name){
                 i.Qj = RSStringSlotDefault;
             }
+            writingBackStation.Qj = RSStringSlotDefault;
+            writingBackStation.Qk = RSStringSlotDefault;
+
         }
 
     }
@@ -491,33 +502,33 @@ private:
     std::map<string, Operation> helperMap;
     //用来初始化中找到合适位置的方法,明明用map要方便一百万倍的.
     //这里有点问题
-    ReservationStation* findRSbyNameAndPointer(string Opcodename){
+    ReservationStation& findRSbyNameAndPointer(string Opcodename){
         for(ReservationStation &i: _stations){
             if(i.isBusy==0){
                 if (Opcodename=="ADD"||Opcodename=="SUB"){
                     if(i.name.find("Add") != std::string::npos){
-                       return &i;
+                       return i;
                     }
                 }
                 else if(Opcodename=="MULT"||Opcodename=="DIV") {
                     if (i.name.find("Mult") != std::string::npos) {
-                        return &i;
+                        return i;
                     }
                 }
                 else if(Opcodename=="LOAD"){
                         if(i.name.find("Load") != std::string::npos){
-                            return &i;
+                            return i;
                         }
                 }
                 else{
                         if(i.name.find("Store")!=std::string::npos){
-                            return &i;
+                            return i;
                         }
                 }
             }
         }
         cout<<"不应出现在这里"<<endl;
-        return nullptr;
+        throw std::out_of_range("name not found: " );
 
     }
     //output, update pointer base on the input type;
@@ -577,15 +588,14 @@ void CommonDataBus::updateStatusBroadcast(RegisterResultStatuses &_registers, Re
                     if(i.i->opcode!="STORE") {
                         _registers.updateFromCDB(i.toBeupdatedDes);
                     }
-                    
+
                 }
                 int index = _stations.findIndexByReservationStation(*i.i);
                 if (index != -1) {
                     _stations.IRtable[index].first.second.cycleWriteResult = currentCycle;
                 }
-                _stations.findAndSetForQJQK(i.toBeupdatedOprand1);
-                _stations.findAndSetForQJQK(i.toBeupdatedOprand2);
-                _stations.findAndSetForQJQK(i.toBeupdatedDes);
+                _stations.findAndSetForQJQK(*i.i,i.toBeupdatedOprand1);
+
 
                 _stations.cleanRS(*i.i);
                 dataItems.pop();
@@ -618,11 +628,17 @@ void simulateTomasulo(vector<std::pair<Instruction, InstructionStatus>> &insTabl
                     _rrs.writeRS(insTable[insTableIndex].first, thiscycle);
                     ++insTableIndex;
                 }
+                else{
+                    cout<<insTable[insTableIndex].first.Opcode<<" is waiting"<<endl;
+                }
             }
             else if(insTable[insTableIndex].first.Opcode=="MULT"||insTable[insTableIndex].first.Opcode=="DIV"){
                 if(_rrs.isMultAvailable()==1){
                     _rrs.writeRS(insTable[insTableIndex].first, thiscycle);
                     ++insTableIndex;
+                }
+                else{
+                    cout<<insTable[insTableIndex].first.Opcode<<" is waiting"<<endl;
                 }
             }
             else if(insTable[insTableIndex].first.Opcode=="LOAD"){
@@ -630,11 +646,17 @@ void simulateTomasulo(vector<std::pair<Instruction, InstructionStatus>> &insTabl
                     _rrs.writeRS(insTable[insTableIndex].first, thiscycle);
                     ++insTableIndex;
                 }
+                else{
+                    cout<<insTable[insTableIndex].first.Opcode<<" is waiting"<<endl;
+                }
             }
             else{
                 if(_rrs.isStoreAvailable()==1){
                     _rrs.writeRS(insTable[insTableIndex].first, thiscycle);
                     ++insTableIndex;
+                }
+                else{
+                    cout<<insTable[insTableIndex].first.Opcode<<" is waiting"<<endl;
                 }
             }
         }
@@ -653,11 +675,15 @@ void simulateTomasulo(vector<std::pair<Instruction, InstructionStatus>> &insTabl
 		PrintRegisterResultStatus4Grade(outputtracename, _register, thiscycle);
 
         ++thiscycle;
-        //rrs not busy, CDB no info
+        //rrs not busy, CDB no info temp banned
        if(_rrs.isFinished()&&CDB.isEmpty()){
            break;
        }
-
+       else{
+           cout<<"rrs status: "<<_rrs.isFinished()<<endl;
+           cout<<"cdb status: "<<CDB.isEmpty()<<endl;
+       }
+        _rrs.printAll();
 		// The simulator should stop when all instructions are finished.
 		// ...
 	}
@@ -749,6 +775,7 @@ int main(int argc, char **argv)
 
 	// ...
     simulateTomasulo(insTable, registerResultStatuses, RS, CDB);
+    RS.printAll();
 	// Simulate Tomasulo:
 	// simulateTomasulo(registerResultStatus, instructionStatus, ...);
     for(int i = 0; i<insTable.size();i++) {
