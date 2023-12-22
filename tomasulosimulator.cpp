@@ -24,6 +24,7 @@ int RSSintSlotDefault = std::numeric_limits<int>::max();
 int IsNotimmdiete(string oprand){
     return oprand[0]=='F';
 }
+
 struct ReservationStation
 {
     int remainCycle;
@@ -35,9 +36,8 @@ struct ReservationStation
     string Qj;
     string Qk;
     string destination;
-    int issueCycle = -1;    // 发射周期
-    int executeCycle = -1;  // 执行开始的周期
-    int writeBackCycle = -1; // 写回周期
+    bool isOperandsReady;
+    int issueCycle = std::numeric_limits<int>::max();    // 发射周期
 
     ReservationStation(string name): name(name){
         isBusy = 0;
@@ -48,6 +48,7 @@ struct ReservationStation
         Qk = "NULL";
         destination = RSStringSlotDefault;
         remainCycle = std::numeric_limits<int>::max();
+        isOperandsReady = true;
     }
     ReservationStation(){
         name = "NULL";
@@ -58,6 +59,7 @@ struct ReservationStation
         Qj = "NULL";
         Qk = "NULL";
         destination = RSStringSlotDefault;
+        isOperandsReady = true;
     }
 };
 enum Operation
@@ -89,7 +91,6 @@ public:
     CommonDataBus(){
 
     }
-    void updateStatusBroadcast(RegisterResultStatuses &_registers, ReservationStations &_stations,int currentCycle);
     struct DataItem {
         string toBeupdatedOprand1;
         string toBeupdatedOprand2;
@@ -101,23 +102,26 @@ public:
         }
         // 其他可能的属性...
     };
+    void updateStatusBroadcast(RegisterResultStatuses &_registers, ReservationStations &_stations,int currentCycle);
+    struct PQComparator{
+        bool operator()(const DataItem& a, const DataItem& b) const {
+            // 自定义比较逻辑
+            // 例如，对于整数，可以比较它们的绝对值
+            return a.i->issueCycle<b.i->issueCycle;
+        }
+    };
+
     int isEmpty(){
-        return dataItems.size()==0 ? 1:0;
+        return dataItems.empty() ? 1:0;
     }
     void append(string oprand1, string oprand2, string destination,ReservationStation* i){
         DataItem temp = DataItem(oprand1, oprand2, destination,i);
-        dataItems.push_back(temp);
-    }
-    void print(){
-        for (const DataItem& d:dataItems) {
-            cout<<111<<endl;
-            cout<<d.toBeupdatedDes<<d.toBeupdatedOprand1<<d.toBeupdatedOprand2<<endl;
-        }
+        dataItems.push(temp);
     }
 
 private:
 
-    std::vector<DataItem> dataItems;  // 存储数据项
+    std::priority_queue<DataItem,vector<DataItem>,PQComparator> dataItems;  // 存储数据项
     // 其他成员变量...
 };
 // We use the following structure to record the time of each instruction
@@ -267,7 +271,7 @@ private:
 class ReservationStations
 {
 public:
-    //什么sb抽象数据结构
+        //什么sb抽象数据结构
     vector<std::pair<std::pair<Instruction,InstructionStatus>,ReservationStation*>> IRtable;
     ReservationStations(HardwareConfig hardwareConfig,CommonDataBus &CDB, RegisterResultStatuses &RRS,vector<std::pair<Instruction,InstructionStatus>>& InsTable):
     hardwareConfig(hardwareConfig),RRS(RRS),cbd(CDB){
@@ -325,38 +329,41 @@ public:
         }
 
     }
-    void updateRS(int currentCycle){
+    void updateRS(int currentCycle) {
         //updateRSBasedOnRegisterStatus();
         //set is busy ==0 出问题了
-        for(ReservationStation& i: _stations){
-            if(i.isBusy){
+        //先筛一边
+        //看起来对于QJQK的更新仍有问题
+
+        for (ReservationStation &i: _stations) {
+            if (i.isBusy) {
                 //这部分应该还有问题
+                bool isUpdated = false;
                 int TableIndex = findIndexByReservationStation(i);
-                cout<<"doing updateing "<<TableIndex<<"\t"<<i.opcode<<endl;
+                //cout << "doing updating " << TableIndex << "\t" << i.opcode << i.remainCycle<<endl;
                 //应该是这句有问题
-                if(i.Qj == RSStringSlotDefault && i.Qk == RSStringSlotDefault){
-                    if (i.remainCycle > 1) {
-                        i.remainCycle--;
-                        cout << "current rCycle " << i.remainCycle << endl;
-                    } else if (i.remainCycle == 1) {
-                        // 当减到1时，表示该周期执行完毕，下个周期可以写回
-                        cout << "finished exe " << i.name << endl;
-                        IRtable[TableIndex].first.second.cycleExecuted = currentCycle;
-                        // 减到 0，准备写回
-                        i.remainCycle = 0;
-                        updateDatabus(i);
-                        // cleanRS(i); // 这个可能需要在写回阶段
+                if (!i.isOperandsReady) {
+                    if (i.Qj == RSStringSlotDefault && i.Qk == RSStringSlotDefault) {
+                        i.isOperandsReady = true;
+                        isUpdated = true;
                     }
                 }
-            //这里ExcuteT
+                if((!isUpdated)&&i.isOperandsReady){
+                    i.remainCycle--;
+                    if (i.remainCycle == 0) {
+                        // 指令执行完成，设置执行周期
+                        IRtable[TableIndex].first.second.cycleExecuted = currentCycle;
+                        updateDatabus(i);
+                        // 更新写回阶段逻辑...
+                    }
+                }
             }
         }
-
-
     }
     //没有这句话的调用??
     void updateDatabus(ReservationStation& i){
         cout<<"update databus "<<i.name<<endl;
+        //cbd.modifyQueue(&i,CommonDataBus::DataItem(i.Vj,i.Vk,i.destination,&i,1));
         cbd.append(i.Vj,i.Vk,i.destination,&i);
     }
     //我要干什么:遍历一边所有保存站:如果vk和vj在Register中找到,则更新qj和qk
@@ -426,8 +433,14 @@ public:
             correctLocation->Vk = i.Oprand2;
         }
         correctLocation->destination =  i.Destination;
+        correctLocation->issueCycle = currentCycle;
         cout<<correctLocation->name+"  "<<correctLocation->remainCycle<<endl;
+        //cbd.append(RSStringSlotDefault,RSStringSlotDefault,RSStringSlotDefault,correctLocation,0);
         updateRSBasedOnRegisterStatusForIssue();
+        if(correctLocation->Qj!=RSStringSlotDefault||correctLocation->Qk!=RSStringSlotDefault){
+            correctLocation->isOperandsReady = false;
+        }
+
     }
     void printAll(){
         for(ReservationStation rs:_stations){
@@ -556,27 +569,30 @@ void PrintResult4Grade(const string &filename, const vector<InstructionStatus> &
 // Function to simulate the Tomasulo algorithm
 //这里 writeBackT.
 void CommonDataBus::updateStatusBroadcast(RegisterResultStatuses &_registers, ReservationStations &_stations,int currentCycle){
-    auto it = dataItems.begin();
-    while (it != dataItems.end()) {
         // 访问当前元素
-        DataItem& i = *it;
-        if (i.toBeupdatedDes.at(0) == 'F') {
-            _registers.updateFromCDB(i.toBeupdatedDes);
-        }
-        int index = _stations.findIndexByReservationStation(*i.i);
-        if (index != -1) {
-            _stations.IRtable[index].first.second.cycleWriteResult = currentCycle;
-        }
-        _stations.findAndSetForQJQK(i.toBeupdatedOprand1);
-        _stations.findAndSetForQJQK(i.toBeupdatedOprand2);
-        _stations.findAndSetForQJQK(i.toBeupdatedDes);
+        if(dataItems.size()!=0) {
+            DataItem i = const_cast<DataItem &>(dataItems.top());
+                //cout << "check top " << i.i->name << i.i->remainCycle << endl;
+                if (i.toBeupdatedDes.at(0) == 'F') {
+                    if(i.i->opcode!="STORE") {
+                        _registers.updateFromCDB(i.toBeupdatedDes);
+                    }
+                    
+                }
+                int index = _stations.findIndexByReservationStation(*i.i);
+                if (index != -1) {
+                    _stations.IRtable[index].first.second.cycleWriteResult = currentCycle;
+                }
+                _stations.findAndSetForQJQK(i.toBeupdatedOprand1);
+                _stations.findAndSetForQJQK(i.toBeupdatedOprand2);
+                _stations.findAndSetForQJQK(i.toBeupdatedDes);
 
-        _stations.cleanRS(*i.i);
+                _stations.cleanRS(*i.i);
+                dataItems.pop();
+        }
         // 处理迭代器删除元素
         // 由于 DataItem 包含引用，需要避免拷贝赋值操作
-        it = dataItems.erase(it);
-    }
-    //cout<<"CDB size "<<dataItems.size()<<endl;
+    cout<<"CDB size "<<dataItems.size()<<endl;
     //_stations.updateRSBasedOnRegisterStatus();
 }
 //input 指针
@@ -592,6 +608,7 @@ void simulateTomasulo(vector<std::pair<Instruction, InstructionStatus>> &insTabl
         CDB.updateStatusBroadcast(_register,_rrs,thiscycle);
         //step 1 CDB updates//记录writeresult时间,更新RRS和RS.
         _rrs.updateRS(thiscycle);
+        _rrs.updateInsTable(insTable);
         //step 2 Check RS and do the calculation
         //如果insTable读完了,就不读le
         //step 3 for any available RS, load an instruction.//queue instead of vector.
@@ -630,7 +647,7 @@ void simulateTomasulo(vector<std::pair<Instruction, InstructionStatus>> &insTabl
 
 		// Issue new instruction in each cycle
 		// ...
-        _rrs.updateInsTable(insTable);
+
         //_rrs.checkBusy();
 		// At the end of this cycle, we need this function to print all registers status for grading
 		PrintRegisterResultStatus4Grade(outputtracename, _register, thiscycle);
