@@ -206,7 +206,12 @@ public:
         }
         return result.str();
     }
-    void updateDatabus(CommonDataBus& cbd){
+    void updateDatabus(ReservationStation &i){
+        for(auto &p:_registers){
+            if(p.second.ReservationStationName==i.name){
+                p.second.ReservationStationName = "";
+            }
+        }
 
 
     }
@@ -337,6 +342,7 @@ public:
         cout<<"trying update"<<endl;
         for (ReservationStation &i: _stations) {
             if (i.isBusy) {
+
                 //这部分应该还有问题
                 bool isUpdated = false;//we
                 int TableIndex = findIndexByReservationStation(i);
@@ -357,6 +363,7 @@ public:
                         // 更新写回阶段逻辑...
                     }
                 }
+                //updateRSBasedOnRegisterStatusForIssue(i);
             }
         }
     }
@@ -454,25 +461,27 @@ public:
     }
 	// ...
     //代码有大问题
-    void findAndSetForQJQK(string RGST) {
+    void findAndSetForQJQK(ReservationStation& writingBackStation,string RGST) {
         for(ReservationStation &i:_stations){
-                if (i.Vk == RGST) {
-                    i.Qk = RSStringSlotDefault;
-                }
-                if (i.Vj == RGST) {
-                    i.Qj = RSStringSlotDefault;
-                }
-            //if(i.Qk==writingBackStation.name){
-                //i.Qk = RSStringSlotDefault;
+                //if (i.Vk == RGST) {
+                    //i.Qk = RSStringSlotDefault;
+                //}
+                //if (i.Vj == RGST) {
+                    //i.Qj = RSStringSlotDefault;
+                //}
+            if(i.Qk==writingBackStation.name){
+                i.Qk = RSStringSlotDefault;
 
-            //}
-            //if(i.Qj==writingBackStation.name){
-                //i.Qj = RSStringSlotDefault;
-            //}
-            //writingBackStation.Qj = RSStringSlotDefault;
-            //writingBackStation.Qk = RSStringSlotDefault;
+            }
+            if(i.Qj==writingBackStation.name){
+                i.Qj = RSStringSlotDefault;
+            }
+            writingBackStation.Qj = RSStringSlotDefault;
+            writingBackStation.Qk = RSStringSlotDefault;
+            //RRS.updateDatabus(writingBackStation);
 
         }
+
 
     }
     void cleanRS(ReservationStation &toBeClean){
@@ -593,9 +602,9 @@ void CommonDataBus::updateStatusBroadcast(RegisterResultStatuses &_registers, Re
                 if (index != -1) {
                     _stations.IRtable[index].first.second.cycleWriteResult = currentCycle;
                 }
-            _stations.findAndSetForQJQK(i.toBeupdatedOprand1);
-            _stations.findAndSetForQJQK(i.toBeupdatedOprand2);
-            _stations.findAndSetForQJQK(i.toBeupdatedDes);
+            _stations.findAndSetForQJQK(*i.i,i.toBeupdatedOprand1);
+            _stations.findAndSetForQJQK(*i.i,i.toBeupdatedOprand2);
+            _stations.findAndSetForQJQK(*i.i,i.toBeupdatedDes);
                 _stations.cleanRS(*i.i);
                 dataItems.pop();
         }
